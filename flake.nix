@@ -76,6 +76,9 @@
               python_with_pkgs = pythonForServer.withPackages (pp: [
                 packages.nahual
                 pp.tensorflow
+                # TF 2.13 expects standalone keras at runtime; tf-keras 2.17
+                # matches the API and works with TF_USE_LEGACY_KERAS=1.
+                pp.tf-keras
                 pp.numpy
                 pp.pillow
                 pp.trio
