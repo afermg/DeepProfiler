@@ -27,6 +27,12 @@
             # cudaSupport (CPU-only at the python wheel layer here), so leave
             # cudaSupport off to avoid pulling cuda-merged-11.8 + cudnn-merged
             # into the wrapper env. Re-enable if you need the GPU runtime libs.
+            # Note: nixpkgs' python311-tensorflow-2.13.0 wheel is CPU-only at
+            # the python layer regardless of cudaSupport. Setting cudaSupport=true
+            # only triggers a 30+ min UCC/NCCL/cudnn-merged source build for no
+            # functional GPU runtime gain. TF GPU support on this fork would
+            # require switching off nixpkgs' TF (e.g. via uv2nix + a CUDA-built
+            # wheel from PyPI) — out of scope for the embedding interface.
             cudaSupport = false;
           };
         };
