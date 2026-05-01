@@ -21,19 +21,13 @@
           system = system;
           config = {
             allowUnfree = true;
-            # tensorflow 2.13's CUDA 11.8 stack rebuilds nccl/ucc from source under
-            # nixos-24.11, which can take >30min on contended hosts. The
-            # python311-tensorflow-2.13.0 store path is the same regardless of
-            # cudaSupport (CPU-only at the python wheel layer here), so leave
-            # cudaSupport off to avoid pulling cuda-merged-11.8 + cudnn-merged
-            # into the wrapper env. Re-enable if you need the GPU runtime libs.
-            # Note: nixpkgs' python311-tensorflow-2.13.0 wheel is CPU-only at
-            # the python layer regardless of cudaSupport. Setting cudaSupport=true
-            # only triggers a 30+ min UCC/NCCL/cudnn-merged source build for no
-            # functional GPU runtime gain. TF GPU support on this fork would
-            # require switching off nixpkgs' TF (e.g. via uv2nix + a CUDA-built
-            # wheel from PyPI) — out of scope for the embedding interface.
-            cudaSupport = false;
+            # cudaSupport=true selects nixpkgs' python311-tensorflow-gpu-2.13.0
+            # derivation (a separate, CUDA-linked TF wheel — not the same store
+            # path as the CPU-only python311-tensorflow-2.13.0). This pulls in
+            # cuda-merged-11.8 + cudnn-merged + UCC/NCCL/NVSHMEM, which on a
+            # cold cache compiles UCC/NCCL from source for ~30+ min. Required
+            # for GPU runtime, so we keep it on.
+            cudaSupport = true;
           };
         };
       in
@@ -50,7 +44,12 @@
               # TF 2.13 in nixos-24.11 expects standalone keras at runtime; the
               # tf-keras 2.17 package matches TF 2.13's compat surface when
               # TF_USE_LEGACY_KERAS=1 is set in the runner.
-              pp.tf-keras
+              # tf-keras' wheel METADATA lists `tensorflow` as a runtime dep,
+              # but with cudaSupport=true we ship `tensorflow-gpu` (different
+              # package name). Skip the runtime-deps check to avoid the
+              # "tensorflow not installed" failure — the import path works at
+              # runtime since both wheels expose the same `tensorflow` module.
+              (pp.tf-keras.overridePythonAttrs (_: { dontCheckRuntimeDeps = true; }))
               pp.numpy
               pp.pillow
               pp.trio
@@ -84,7 +83,12 @@
                 pp.tensorflow
                 # TF 2.13 expects standalone keras at runtime; tf-keras 2.17
                 # matches the API and works with TF_USE_LEGACY_KERAS=1.
-                pp.tf-keras
+                # tf-keras' wheel METADATA lists `tensorflow` as a runtime dep,
+              # but with cudaSupport=true we ship `tensorflow-gpu` (different
+              # package name). Skip the runtime-deps check to avoid the
+              # "tensorflow not installed" failure — the import path works at
+              # runtime since both wheels expose the same `tensorflow` module.
+              (pp.tf-keras.overridePythonAttrs (_: { dontCheckRuntimeDeps = true; }))
                 pp.numpy
                 pp.pillow
                 pp.trio
