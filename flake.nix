@@ -4,6 +4,7 @@
     systems.url = "github:nix-systems/default";
     flake-utils.url = "github:numtide/flake-utils";
     flake-utils.inputs.systems.follows = "systems";
+    nahual-flake.url = "github:afermg/nahual";
   };
 
   outputs =
@@ -70,7 +71,10 @@
         packages = {
           # Build pynng locally for python3.11 (tensorflow 2.13's interpreter).
           pynng = pythonForServer.pkgs.callPackage ./nix/pynng.nix { };
-          nahual = pythonForServer.pkgs.callPackage ./nix/nahual.nix {
+          # nahual recipe sourced from upstream flake; built against our
+          # local python3.11 since the upstream-built python3.13 wheel
+          # would ABI-clash with TF 2.13.
+          nahual = pythonForServer.pkgs.callPackage (inputs.nahual-flake + "/nix/nahual.nix") {
             pynng = packages.pynng;
           };
         };
