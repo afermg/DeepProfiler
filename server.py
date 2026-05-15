@@ -31,7 +31,7 @@ import numpy
 import pynng
 import tensorflow as tf
 import trio
-from nahual.preprocess import pad_channel_dim, validate_input_shape
+from nahual.preprocess import channel_chunks_rigid3, validate_input_shape
 from nahual.server import responder
 
 # TF 2.13 in nixos-24.11 doesn't ship a top-level `keras` module, but `tf_keras`
@@ -162,9 +162,12 @@ def process(
 ) -> numpy.ndarray:
     """Run a CPCNNv1-style backbone on an NCZYX numpy array.
 
-    The Z dimension is dropped, channels are padded to ``expected_channels``,
-    and the array is transposed to NHWC for Keras. Returns a numpy embedding
-    of shape (N, feature_dim).
+    CPCNNv1 is a rigid 3-channel ImageNet ResNet. Inputs with C ≠ 3 are
+    split into ``ceil(C/3)`` 3-channel chunks via
+    :func:`nahual.preprocess.channel_chunks_rigid3` (recycling leading
+    channels for the trailing chunk), the backbone is run on each chunk,
+    and per-chunk pooled features are concatenated along the feature axis.
+    Final shape is ``(N, feature_dim · ceil(C/3))``.
     """
     if pixels.ndim != 5:
         raise ValueError(
@@ -173,20 +176,19 @@ def process(
     _, _, _, *input_yx = pixels.shape
     validate_input_shape(input_yx, expected_tile_size)
 
-    # pad_channel_dim drops Z (axis 2) and pads channels (axis 1) → NCHW.
-    pixels = pad_channel_dim(pixels, expected_channels)
-
-    # Keras backbones expect NHWC, float32.
-    pixels = numpy.ascontiguousarray(
-        numpy.transpose(pixels, (0, 2, 3, 1)).astype(numpy.float32)
-    )
-
+    chunks = channel_chunks_rigid3(pixels)
+    outs = []
     with tf.device(device_spec):
-        feats = model(pixels, training=False)
-    # Convert TF tensor → numpy before returning.
-    if hasattr(feats, "numpy"):
-        feats = feats.numpy()
-    return feats
+        for chunk in chunks:
+            # Keras backbones expect NHWC, float32.
+            chunk = numpy.ascontiguousarray(
+                numpy.transpose(chunk, (0, 2, 3, 1)).astype(numpy.float32)
+            )
+            feats = model(chunk, training=False)
+            if hasattr(feats, "numpy"):
+                feats = feats.numpy()
+            outs.append(feats)
+    return numpy.concatenate(outs, axis=1)
 
 
 async def main():
