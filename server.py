@@ -61,6 +61,7 @@ def setup(
     expected_tile_size: int = 32,
     expected_channels: int = 3,
     input_size: int = 224,
+    device: int | None = None,
 ) -> tuple[Callable, dict]:
     """Build a CPCNNv1-style Keras backbone for feature extraction.
 
@@ -79,6 +80,8 @@ def setup(
     input_size : int
         Spatial size used to define the model's input. The model is functional
         and accepts variable HxW at inference, but we declare a default.
+    device : int | None
+        CUDA device index. ``None`` → GPU:0 if a GPU is visible, else CPU.
     """
     key = backbone.lower()
     if key not in _SUPPORTED_BACKBONES:
@@ -99,31 +102,39 @@ def setup(
         # Treat unknown string as "no weights" to keep smoke tests resilient.
         weights = None
 
-    if weights in (None, "imagenet"):
-        model = factory(
-            include_top=False,
-            weights=weights,
-            input_shape=(input_size, input_size, expected_channels),
-            pooling="avg",
-        )
-        load_info = {"weights": weights or "random"}
-    else:
-        # Treat as a path to a Keras .h5 checkpoint.
-        model = factory(
-            include_top=False,
-            weights=None,
-            input_shape=(input_size, input_size, expected_channels),
-            pooling="avg",
-        )
-        model.load_weights(weights)
-        load_info = {"weights": weights}
-
-    # Detect available device (informational only — TF auto-places).
     gpus = tf.config.list_physical_devices("GPU")
-    device_str = "GPU:0" if gpus else "CPU:0"
+    if gpus:
+        idx = 0 if device is None else int(device)
+        if idx >= len(gpus):
+            raise ValueError(
+                f"device={idx} out of range; only {len(gpus)} GPU(s) visible to TF"
+            )
+        device_spec = f"/GPU:{idx}"
+    else:
+        device_spec = "/CPU:0"
+
+    with tf.device(device_spec):
+        if weights in (None, "imagenet"):
+            model = factory(
+                include_top=False,
+                weights=weights,
+                input_shape=(input_size, input_size, expected_channels),
+                pooling="avg",
+            )
+            load_info = {"weights": weights or "random"}
+        else:
+            # Treat as a path to a Keras .h5 checkpoint.
+            model = factory(
+                include_top=False,
+                weights=None,
+                input_shape=(input_size, input_size, expected_channels),
+                pooling="avg",
+            )
+            model.load_weights(weights)
+            load_info = {"weights": weights}
 
     info = {
-        "device": device_str,
+        "device": device_spec.lstrip("/"),
         "backbone": key,
         "expected_tile_size": expected_tile_size,
         "expected_channels": expected_channels,
@@ -137,6 +148,7 @@ def setup(
         model=model,
         expected_tile_size=expected_tile_size,
         expected_channels=expected_channels,
+        device_spec=device_spec,
     )
     return processor, info
 
@@ -146,6 +158,7 @@ def process(
     model,
     expected_tile_size: int,
     expected_channels: int,
+    device_spec: str = "/GPU:0",
 ) -> numpy.ndarray:
     """Run a CPCNNv1-style backbone on an NCZYX numpy array.
 
@@ -168,7 +181,8 @@ def process(
         numpy.transpose(pixels, (0, 2, 3, 1)).astype(numpy.float32)
     )
 
-    feats = model(pixels, training=False)
+    with tf.device(device_spec):
+        feats = model(pixels, training=False)
     # Convert TF tensor → numpy before returning.
     if hasattr(feats, "numpy"):
         feats = feats.numpy()
